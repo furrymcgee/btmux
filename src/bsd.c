@@ -468,10 +468,47 @@ void shovechars(int port) {
     event_set(&listen_sock_ev, mux_bound_socket, EV_READ | EV_PERSIST, 
             accept_new_connection, NULL);
     event_add(&listen_sock_ev, NULL);
- 
-#ifdef IPV6_SUPPORT
-    if(mux_bound_socket6 < 0) {
-        mux_bound_socket6 = bind_mux6_socket(port);
+    get_tod(&last_slice);
+
+    while (mudstate.shutdown_flag == 0) {
+        get_tod(&current_time);
+        last_slice = update_quotas(last_slice, current_time);
+
+        process_commands();
+        if (mudstate.shutdown_flag)
+            break;
+
+        /*
+         * test for events 
+         */
+
+        dispatch();
+
+        /*
+         * any queued robot commands waiting? 
+         */
+
+        next_slice = msec_add(last_slice, mudconf.timeslice);
+        slice_timeout = timeval_sub(next_slice, current_time);
+
+        /* run event loop */
+
+        if(event_loopexit(&slice_timeout) < 0) {
+            perror("event_loop");
+            exit(0);
+        }
+        
+        if(event_dispatch() < 0) {
+            perror("event_loop");
+            exit(0);
+        }
+
+        /*
+         * run robot commands
+         */
+
+        if (mudconf.queue_chunk)
+            do_top(mudconf.queue_chunk);
     }
     event_set(&listen6_sock_ev, mux_bound_socket6, EV_READ | EV_PERSIST, 
             accept_new6_connection, NULL);
